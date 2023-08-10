@@ -9,11 +9,12 @@ from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, mak
 
 
 class DDIMSampler(object):
-    def __init__(self, model, schedule="linear", **kwargs):
+    def __init__(self, model, schedule="linear", eps_scaler=1.0, **kwargs):
         super().__init__()
         self.model = model
         self.ddpm_num_timesteps = model.num_timesteps
         self.schedule = schedule
+        self.eps_scaler = [eps_scaler for i in range(100)]
 
     def register_buffer(self, name, attr):
         if type(attr) == torch.Tensor:
@@ -190,8 +191,9 @@ class DDIMSampler(object):
         sigma_t = torch.full((b, 1, 1, 1), sigmas[index], device=device)
         sqrt_one_minus_at = torch.full((b, 1, 1, 1), sqrt_one_minus_alphas[index],device=device)
 
+        print(f"using scaler {self.eps_scaler[index]} at timestep {index}")
         # current prediction for x_0
-        pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
+        pred_x0 = (x - sqrt_one_minus_at * (e_t / self.eps_scaler[index])) / a_t.sqrt()
         if quantize_denoised:
             pred_x0, _, *_ = self.model.first_stage_model.quantize(pred_x0)
         # direction pointing to x_t

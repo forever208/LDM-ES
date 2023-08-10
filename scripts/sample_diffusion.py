@@ -66,9 +66,8 @@ def convsample(model, shape, return_intermediates=True,
 
 
 @torch.no_grad()
-def convsample_ddim(model, steps, shape, eta=1.0
-                    ):
-    ddim = DDIMSampler(model)
+def convsample_ddim(model, steps, shape, eta=1.0, eps_scaler=1.0):
+    ddim = DDIMSampler(model, eps_scaler=eps_scaler)
     bs = shape[0]
     shape = shape[1:]
     samples, intermediates = ddim.sample(steps, batch_size=bs, shape=shape, eta=eta, verbose=False,)
@@ -76,9 +75,7 @@ def convsample_ddim(model, steps, shape, eta=1.0
 
 
 @torch.no_grad()
-def make_convolutional_sample(model, batch_size, vanilla=False, custom_steps=None, eta=1.0,):
-
-
+def make_convolutional_sample(model, batch_size, vanilla=False, custom_steps=None, eta=1.0, eps_scaler=1.0):
     log = dict()
 
     shape = [batch_size,
@@ -93,7 +90,7 @@ def make_convolutional_sample(model, batch_size, vanilla=False, custom_steps=Non
                                          make_prog_row=True)
         else:
             sample, intermediates = convsample_ddim(model,  steps=custom_steps, shape=shape,
-                                                    eta=eta)
+                                                    eta=eta, eps_scaler=eps_scaler)
 
         t1 = time.time()
 
@@ -105,7 +102,9 @@ def make_convolutional_sample(model, batch_size, vanilla=False, custom_steps=Non
     print(f'Throughput for this batch: {log["throughput"]}')
     return log
 
-def run(model, logdir, batch_size=50, vanilla=False, custom_steps=None, eta=None, n_samples=50000, nplog=None):
+
+def run(model, logdir, batch_size=50, vanilla=False, custom_steps=None,
+        eta=None, n_samples=50000, nplog=None, eps_scaler=1.0):
     if vanilla:
         print(f'Using Vanilla DDPM sampling with {model.num_timesteps} sampling steps.')
     else:
@@ -119,15 +118,18 @@ def run(model, logdir, batch_size=50, vanilla=False, custom_steps=None, eta=None
         all_images = []
 
         print(f"Running unconditional sampling for {n_samples} samples")
-        for _ in trange(n_samples // batch_size, desc="Sampling Batches (unconditional)"):
+        print(f" ")
+        for i in trange((n_samples//batch_size)+1, desc="Sampling Batches (unconditional)"):
             logs = make_convolutional_sample(model, batch_size=batch_size,
                                              vanilla=vanilla, custom_steps=custom_steps,
-                                             eta=eta)
+                                             eta=eta, eps_scaler=eps_scaler)
             n_saved = save_logs(logs, logdir, n_saved=n_saved, key="sample")
             all_images.extend([custom_to_np(logs["sample"])])
             if n_saved >= n_samples:
                 print(f'Finish after generating {n_saved} samples')
                 break
+            print(f"generated {(i+1)*batch_size} samples")
+            print(f" ")
         all_img = np.concatenate(all_images, axis=0)
         all_img = all_img[:n_samples]
         shape_str = "x".join([str(x) for x in all_img.shape])
@@ -146,9 +148,9 @@ def save_logs(logs, path, n_saved=0, key="sample", np_path=None):
             batch = logs[key]
             if np_path is None:
                 for x in batch:
-                    img = custom_to_pil(x)
-                    imgpath = os.path.join(path, f"{key}_{n_saved:06}.png")
-                    img.save(imgpath)
+                    # img = custom_to_pil(x)
+                    # imgpath = os.path.join(path, f"{key}_{n_saved:06}.png")
+                    # img.save(imgpath)
                     n_saved += 1
             else:
                 npbatch = custom_to_np(batch)
@@ -213,6 +215,13 @@ def get_parser():
         nargs="?",
         help="the bs",
         default=10
+    )
+    parser.add_argument(
+        "--eps_scaler",
+        type=float,
+        nargs="?",
+        help="epsilon scaler",
+        default=1.0
     )
     return parser
 
@@ -305,9 +314,9 @@ if __name__ == "__main__":
         yaml.dump(sampling_conf, f, default_flow_style=False)
     print(sampling_conf)
 
-
+    # unconditional sampling
     run(model, imglogdir, eta=opt.eta,
         vanilla=opt.vanilla_sample,  n_samples=opt.n_samples, custom_steps=opt.custom_steps,
-        batch_size=opt.batch_size, nplog=numpylogdir)
+        batch_size=opt.batch_size, nplog=numpylogdir, eps_scaler=opt.eps_scaler)
 
     print("done.")
